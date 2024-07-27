@@ -9,6 +9,9 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from scipy.spatial.transform import Rotation as SST_Rotation
 
+HOME_LAT = 487227300
+HOME_LONG = 115506793
+HOME_ALT = 200
 
 HEIGHT_HOVER = -3.0
 
@@ -23,12 +26,13 @@ SETPOINTS = [
 THRESHOLD_DISTANCE = 1.0
 
 STATE_IDLE = 0
-STATE_ARM = 1
-STATE_TAKEOFF = 2
-STATE_MOVE1 = 3
-STATE_TURN = 4
-STATE_MOVE2 = 5
-STATE_LAND = 6
+STATE_OFFBOARD = 1
+STATE_ARM = 2
+STATE_TAKEOFF = 3
+STATE_MOVE1 = 4
+STATE_TURN = 5
+STATE_MOVE2 = 6
+STATE_LAND = 7
 
 TIMER_STATE_CHANGE = 100
 
@@ -52,13 +56,13 @@ class SDC2024_Agent(Node):
 
 		self.publisher_offboard_control_mode	= self.create_publisher(OffboardControlMode,		'/fmu/in/offboard_control_mode',		qos_profile)
 		self.publisher_trajectory_setpoint		= self.create_publisher(TrajectorySetpoint,			'/fmu/in/trajectory_setpoint',			qos_profile)
-		self.vehicle_command_publisher			= self.create_publisher(VehicleCommand,				'/fmu/in/vehicle_command',				qos_profile)
-		self.vehicle_visual_odometry			= self.create_publisher(VehicleOdometry,			'/fmu/in/vehicle_visual_odometry',		qos_profile)
+		self.publisher_vehicle_command			= self.create_publisher(VehicleCommand,				'/fmu/in/vehicle_command',				qos_profile)
+		self.publisher_vehicle_visual_odometry	= self.create_publisher(VehicleOdometry,			'/fmu/in/vehicle_visual_odometry',		qos_profile)
 
 		self.subscriber_vehicle_local_position	= self.create_subscription(VehicleLocalPosition,	'/fmu/out/vehicle_local_position',		self.callback_vehicle_local_position,	qos_profile)
 		self.subscriber_vehicle_status			= self.create_subscription(VehicleStatus,			'/fmu/out/vehicle_status',				self.vehicle_status_callback,			qos_profile)
 
-		self.counter_offboard_timer = 90
+		self.counter_offboard_timer = 50
 		self.vehicle_local_position = VehicleLocalPosition()
 		self.vehicle_status = VehicleStatus()
 
@@ -66,7 +70,7 @@ class SDC2024_Agent(Node):
 
 		self.timer_offboard = self.create_timer(0.1, self.callback_timer)
 
-		self.timer_odometry = self.create_timer(1 / 30, self.publish_vehicle_odometry)
+		# self.timer_odometry = self.create_timer(1 / 30, self.publish_vehicle_odometry)
 
 		self.index_setpoint = 0
 
@@ -76,6 +80,7 @@ class SDC2024_Agent(Node):
 	def callback_vehicle_local_position(self, vehicle_local_position):
 		# print(f"vehicle_local_position: {vehicle_local_position}")
 		self.vehicle_local_position = vehicle_local_position
+		print(f"self.vehicle_local_position.x, self.vehicle_local_position.y: {self.vehicle_local_position.x}, {self.vehicle_local_position.y}")
 
 	# ******************************************
 	def vehicle_status_callback(self, vehicle_status):
@@ -185,11 +190,11 @@ class SDC2024_Agent(Node):
 		msg.source_system = 1
 		msg.source_component = 1
 		msg.from_external = True
-		self.vehicle_command_publisher.publish(msg)
+		self.publisher_vehicle_command.publish(msg)
 
 	# ******************************************
 	def publish_vehicle_odometry(self) -> None:
-		print(f"self.vehicle_local_position.x, self.vehicle_local_position.y: {self.vehicle_local_position.x}, {self.vehicle_local_position.y}")
+		# print(f"self.vehicle_local_position.x, self.vehicle_local_position.y: {self.vehicle_local_position.x}, {self.vehicle_local_position.y}")
 
 		msg = VehicleOdometry()
 		msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
@@ -210,7 +215,7 @@ class SDC2024_Agent(Node):
 		msg.velocity_variance = [float('nan'), float('nan'), float('nan')]
 
 
-		self.vehicle_visual_odometry.publish(msg)		
+		self.publisher_vehicle_visual_odometry.publish(msg)		
 
 	# ******************************************
 	def callback_timer(self) -> None:
@@ -222,32 +227,35 @@ class SDC2024_Agent(Node):
 			print(f"self.state: {self.state}")
 			self.counter_offboard_timer = 0
 
-		if (self.state == STATE_ARM):
-			self.arm()
+		if (self.state== STATE_OFFBOARD):
 			self.set_mode_offboard()
 
-		if (self.state == STATE_TAKEOFF):
-			self.publish_trajectory_setpoint_position([float('nan'), float('nan'), HEIGHT_HOVER])
-			self.publish_trajectory_setpoint_yaw_deg(90.0)
+		if (self.state == STATE_ARM):
+			print("arming")
+			self.arm()
 
-		if (self.state == STATE_MOVE1):
-			self.publish_trajectory_setpoint_position([float('nan'), float('nan'), HEIGHT_HOVER])
-			self.publish_trajectory_setpoint_velocity([0.0, 2.0, 0.0])
+		# if (self.state == STATE_TAKEOFF):
+		# 	self.publish_trajectory_setpoint_position([float('nan'), float('nan'), HEIGHT_HOVER])
+		# 	self.publish_trajectory_setpoint_yaw_deg(90.0)
 
-		if (self.state == STATE_TURN):
-			yaw_deg = math.degrees(self.vehicle_local_position.heading)
-			yaw_deg += 5
-			print(f"yaw_deg: {yaw_deg}")
-			self.publish_trajectory_setpoint_position([float('nan'), float('nan'), HEIGHT_HOVER])
-			self.publish_trajectory_setpoint_yaw_deg(yaw_deg)
+		# if (self.state == STATE_MOVE1):
+		# 	self.publish_trajectory_setpoint_position([float('nan'), float('nan'), HEIGHT_HOVER])
+		# 	self.publish_trajectory_setpoint_velocity([0.0, 2.0, 0.0])
 
-		if (self.state == STATE_MOVE2):
-			self.publish_trajectory_setpoint_position([float('nan'), float('nan'), HEIGHT_HOVER])
-			self.publish_trajectory_setpoint_velocity([0.0, -2.0, 0.0])
+		# if (self.state == STATE_TURN):
+		# 	yaw_deg = math.degrees(self.vehicle_local_position.heading)
+		# 	yaw_deg += 5
+		# 	print(f"yaw_deg: {yaw_deg}")
+		# 	self.publish_trajectory_setpoint_position([float('nan'), float('nan'), HEIGHT_HOVER])
+		# 	self.publish_trajectory_setpoint_yaw_deg(yaw_deg)
 
-		if (self.state == STATE_LAND):
-			self.land()
-			exit(0)
+		# if (self.state == STATE_MOVE2):
+		# 	self.publish_trajectory_setpoint_position([float('nan'), float('nan'), HEIGHT_HOVER])
+		# 	self.publish_trajectory_setpoint_velocity([0.0, -2.0, 0.0])
+
+		# if (self.state == STATE_LAND):
+		# 	self.land()
+		# 	exit(0)
 
 
 def main(args=None) -> None:
